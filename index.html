@@ -28,6 +28,7 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--
 #grain,#vignette{position:fixed;inset:0;pointer-events:none}
 #grain{z-index:2;opacity:.085;mix-blend-mode:multiply;background-size:220px 220px}
 #vignette{z-index:2;background:radial-gradient(120% 95% at 56% 52%,rgba(0,0,0,0) 58%,rgba(46,34,48,.17) 100%)}
+[hidden]{display:none!important}
 .ui{position:fixed;z-index:3;transition:opacity .5s ease}
 body.pure .ui{opacity:0;pointer-events:none}
 
@@ -270,6 +271,37 @@ const barkTex = cvs(128, 256, (g, w, h) => {
   for (let i = 0; i < 40; i++){ g.strokeStyle = 'rgba(60,45,45,.12)'; g.beginPath(); const x = rnd() * w; g.moveTo(x, 0); g.lineTo(x + R(-6, 6), h); g.stroke(); }
 });
 barkTex.wrapS = barkTex.wrapT = THREE.RepeatWrapping; barkTex.repeat.set(2, 3);
+// cherry bark for the trees: grey-brown, horizontal lenticels, shallow fissures, lichen
+const treeBarkTex = cvs(256, 512, (g, w, h) => {
+  g.fillStyle = '#857772'; g.fillRect(0, 0, w, h);
+  const id = g.getImageData(0, 0, w, h), d = id.data;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){
+    const n = fbm(x / 22, y / 60) - 0.5, n2 = vnoise(x / 4, y / 9) - 0.5;
+    const v = n * 46 + n2 * 14, i = (y * w + x) * 4;
+    d[i] += v; d[i + 1] += v * 0.95; d[i + 2] += v * 0.92;
+  }
+  g.putImageData(id, 0, 0);
+  // vertical fissures (wrap-safe: drawn twice across the seam)
+  for (let k = 0; k < 26; k++){
+    let x = rnd() * w; const y0 = rnd() * h, len = R(40, 200);
+    g.lineWidth = R(0.8, 2.2); g.strokeStyle = `rgba(52,42,40,${R(0.18, 0.4).toFixed(2)})`;
+    for (const ox of [0, -w, w]){ g.beginPath(); let xx = x + ox; g.moveTo(xx, y0); for (let y = y0; y < y0 + len; y += 8){ xx += R(-1.6, 1.6); g.lineTo(xx, y); } g.stroke(); }
+  }
+  // horizontal lenticels, the signature of cherry bark
+  for (let k = 0; k < 260; k++){
+    const x = rnd() * w, y = rnd() * h, l = R(6, 30), t = R(1.2, 3);
+    for (const ox of [0, -w, w]){
+      g.fillStyle = `rgba(48,38,38,${R(0.35, 0.65).toFixed(2)})`; g.beginPath(); g.ellipse(x + ox, y, l / 2, t / 2, 0, 0, 6.3); g.fill();
+      g.fillStyle = `rgba(200,188,180,${R(0.15, 0.3).toFixed(2)})`; g.fillRect(x + ox - l / 2, y + t / 2, l, 1);
+    }
+  }
+  // pale lichen patches
+  for (let k = 0; k < 14; k++){
+    const x = rnd() * w, y = rnd() * h, rr = R(6, 16);
+    for (let j = 0; j < 12; j++){ g.fillStyle = `rgba(${R(160, 190) | 0},${R(175, 195) | 0},${R(160, 175) | 0},${R(0.15, 0.3).toFixed(2)})`; g.beginPath(); g.arc(x + R(-rr, rr), y + R(-rr, rr) * 0.6, R(1.5, 4), 0, 6.3); g.fill(); }
+  }
+});
+treeBarkTex.wrapS = treeBarkTex.wrapT = THREE.RepeatWrapping;
 
 /* ---------- lights ---------- */
 const hemi = new THREE.HemisphereLight(0xdde9f0, 0xb7bf9f, 1.8);
@@ -875,16 +907,28 @@ function buildCards(list, map, trans){
 const blossomCards = [], leafCards = [], perches = [];
 const BPAL = ['#fff6f8', '#fde9ef', '#fadbe5', '#f6cdda', '#f2c0d1', '#fbe2ea', '#f4d3df'].map(C);
 const treeInfo = [];
+const treeBarkMat = toon(0xd9d2ce, { map: treeBarkTex, snow: true });
 function makeTree(o){
   const geos = [], tips = [];
   const base = new THREE.Vector3(o.x, height(o.x, o.z) - 0.2, o.z);
   const lean = new THREE.Vector3(o.lean[0], 0, o.lean[1]);
   function seg(a, b, r0, r1){
     const len = a.distanceTo(b);
-    const g = new THREE.CylinderGeometry(r1, r0, len, 9, 1, true); g.translate(0, len / 2, 0);
+    const g = new THREE.CylinderGeometry(r1, r0, len, 12, Math.max(1, Math.round(len / 0.35)), true);
+    { // knobbly bark silhouette + world-scaled UVs so the texture is not stretched on long limbs
+      const ps = g.attributes.position, uv = g.attributes.uv, ku = Math.max(1, Math.round(Math.PI * 2 * r0 / 0.55)), vOff = rnd() * 4;
+      for (let i = 0; i < ps.count; i++){
+        const x = ps.getX(i), y = ps.getY(i), z = ps.getZ(i);
+        const f = 1 + (vnoise(x * 9 + z * 7 + 3, y * 4 + vOff) - 0.5) * 0.16;
+        ps.setXYZ(i, x * f, y, z * f);
+        uv.setXY(i, uv.getX(i) * ku, (uv.getY(i) * len) / 0.9 + vOff);
+      }
+      g.computeVertexNormals();
+    }
+    g.translate(0, len / 2, 0);
     g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(UP, b.clone().sub(a).normalize())); g.translate(a.x, a.y, a.z);
     geos.push(g.toNonIndexed());
-    const s = new THREE.IcosahedronGeometry(r1 * 1.03, 1); s.translate(b.x, b.y, b.z); geos.push(s);
+    const s = new THREE.IcosahedronGeometry(r1 * 1.06, 1); s.translate(b.x, b.y, b.z); geos.push(s);
   }
   const elevs = o.elevs;
   function grow(p, dir, len, r, d, az){
@@ -896,6 +940,16 @@ function makeTree(o){
       const nx = cur.clone().addScaledVector(nd, len / n);
       seg(cur, nx, lerp(r, rEnd, i / n), lerp(r, rEnd, (i + 1) / n));
       if (d >= 2 && i > 0 && rnd() < o.mid) tips.push({ p: nx.clone(), small: true });
+      // short flowering spurs hugging the limbs so the wood never reads as bare
+      if (d >= 1 && rnd() < (d === 1 ? 0.55 : 0.75) * o.mid + 0.15){
+        const side = new THREE.Vector3(R(-1, 1), R(0.2, 1), R(-1, 1)).normalize();
+        side.addScaledVector(nd, -side.dot(nd)).normalize();
+        tips.push({ p: cur.clone().lerp(nx, R(0.3, 0.8)).addScaledVector(side, lerp(r, rEnd, 0.5) + 0.06), small: true, spur: true });
+      }
+      if (d === 0 && i >= 2 && rnd() < 0.5){
+        const side = new THREE.Vector3(R(-1, 1), R(-0.2, 0.4), R(-1, 1)).normalize();
+        tips.push({ p: cur.clone().lerp(nx, R(0.2, 0.9)).addScaledVector(side, r * 0.95), small: true, spur: true });
+      }
       cur = nx; cd = nd;
     }
     if (d >= 1 && d <= 2 && cur.y > 2.2) perches.push({ p: cur.clone(), r: rEnd, tree: o.id });
@@ -910,15 +964,15 @@ function makeTree(o){
   }
   grow(base, new THREE.Vector3(o.lean[0] * 0.5, 1, o.lean[1] * 0.5).normalize(), o.trunk, o.r, 0, R(0, 6.3));
   const geo = mergeGeometries(geos);
-  const mesh = new THREE.Mesh(geo, M.bark); mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
+  const mesh = new THREE.Mesh(geo, treeBarkMat); mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
   // blossom clusters
   const center = tips.reduce((a, t) => a.add(t.p), new THREE.Vector3()).multiplyScalar(1 / tips.length);
   let top = 0;
   const target = o.leafy ? leafCards : blossomCards;
   for (const t of tips){
-    const cr = o.cr * (t.small ? R(0.4, 0.7) : R(0.75, 1.25));
-    const cnt = Math.round(o.dens * (t.small ? R(5, 10) : R(14, 24)));
-    const cc = t.p.clone().add(new THREE.Vector3(R(-0.1, 0.1), R(0.05, 0.22), R(-0.1, 0.1)));
+    const cr = o.cr * (t.spur ? R(0.28, 0.45) : t.small ? R(0.4, 0.7) : R(0.75, 1.25));
+    const cnt = Math.round(o.dens * (t.spur ? R(4, 8) : t.small ? R(5, 10) : R(14, 24)));
+    const cc = t.spur ? t.p.clone() : t.p.clone().add(new THREE.Vector3(R(-0.1, 0.1), R(0.05, 0.22), R(-0.1, 0.1)));
     for (let i = 0; i < cnt; i++){
       const u = new THREE.Vector3(R(-1, 1), R(-0.6, 1), R(-1, 1)); if (u.lengthSq() > 1) u.normalize();
       const p = cc.clone().add(new THREE.Vector3(u.x * cr, u.y * cr * 0.55 + 0.05, u.z * cr));
