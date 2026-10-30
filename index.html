@@ -47,6 +47,14 @@ body.pure .ui{opacity:0;pointer-events:none}
 .dock button:focus-visible,#exit:focus-visible,#time:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .seg{display:flex;gap:2px;padding-right:6px;margin-right:2px;border-right:1px solid var(--panel-line)}
 .seg button{padding:7px 10px;font-family:var(--f-display);font-size:14px}
+.sw{display:inline-block;width:16px;height:16px;border-radius:50%;box-shadow:0 0 0 1px var(--panel-line);background:linear-gradient(135deg,var(--roof,#a7774c) 50%,var(--wall,#f6eee0) 50%)}
+#palBtn{padding:7px 9px!important}
+.pal{left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));display:flex;gap:4px;padding:6px;border-radius:16px;background:var(--panel);border:1px solid var(--panel-line);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:4;max-width:calc(100vw - 32px);box-sizing:border-box}
+.pal button{font:inherit;font-size:12px;letter-spacing:.06em;color:var(--ink);background:transparent;border:0;border-radius:12px;padding:6px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px;min-width:54px}
+.pal button .sw{width:26px;height:26px}
+.pal button.on{background:var(--chip-on)}
+.pal button:hover{background:var(--panel-line)}
+.pal button:focus-visible,#palBtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .sl{display:flex;align-items:center;gap:8px;padding:0 6px 0 10px;border-left:1px solid var(--panel-line);margin-left:2px}
 #time{-webkit-appearance:none;appearance:none;width:150px;height:18px;background:transparent;cursor:pointer}
 #time::-webkit-slider-runnable-track{height:2px;border-radius:2px;background:linear-gradient(90deg,#cfe0e2,#f4dccb 55%,#e8b28e 66%,#6d7598 78%,#2b3756)}
@@ -77,6 +85,7 @@ body.pure .ui{opacity:0;pointer-events:none}
   .seg button{padding:5px 14px}
   #time{width:min(70vw,260px)}
   .hint{display:none}
+  .pal{bottom:calc(150px + env(safe-area-inset-bottom,0px))}
 }
 @media (prefers-reduced-motion:reduce){.ui,#loading{transition:none}}
 </style>
@@ -101,8 +110,10 @@ body.pure .ui{opacity:0;pointer-events:none}
   <button type="button" id="b18" data-t="18">黄昏<small>18:00</small></button>
   <button type="button" id="b22" data-t="22">夜晚<small>22:00</small></button>
   <div class="sl"><input type="range" id="time" min="6" max="24" step="0.01" value="7" aria-label="时间"><output id="clock" for="time">07:00</output>
+  <button type="button" id="palBtn" title="小屋配色" aria-label="小屋配色" aria-expanded="false" aria-controls="pal"><span class="sw" id="palCur"></span></button>
   <button type="button" id="pure" title="纯享模式（H）" aria-label="纯享模式"><svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg></button></div>
 </nav>
+<div class="ui pal" id="pal" hidden role="group" aria-label="屋顶与墙壁配色"></div>
 <button type="button" id="exit" hidden title="退出纯享模式" aria-label="退出纯享模式"><svg viewBox="0 0 14 14"><path d="M3 3l8 8M11 3l-8 8"/></svg></button>
 
 <script type="importmap">
@@ -1450,6 +1461,36 @@ const tState = { t: 7, from: 7, to: 7, start: 0, dur: 0 };
 timeBtns.forEach(b => b.addEventListener('click', () => { tState.from = tState.t; tState.to = +b.dataset.t; tState.start = performance.now(); tState.dur = reduceMotion ? 1 : 1400; }));
 slider.addEventListener('input', () => { tState.t = tState.to = +slider.value; tState.dur = 0; applyTime(tState.t); });
 
+/* cottage colour schemes (roof + wall), the four Jacey picked */
+const SCHEMES = [
+  { id: 'B', name: '焦糖', roof: '#a7774c', wall: '#f6eee0' },
+  { id: 'C', name: '咖啡', roof: '#4a3730', wall: '#ead6b8' },
+  { id: 'D', name: '赤陶', roof: '#9c5638', wall: '#f3e8d6' },
+  { id: 'E', name: '茶灰', roof: '#6b6560', wall: '#dcd0bf' },
+];
+const tileInst = house.children.filter(o => o.isInstancedMesh && o.material !== M.tileDark);
+const palEl = document.getElementById('pal'), palBtn = document.getElementById('palBtn');
+function applyScheme(id){
+  const S = SCHEMES.find(x => x.id === id) || SCHEMES[0];
+  const c = C(S.roof);
+  M.tile.color.copy(c); M.tileDark.color.copy(c).multiplyScalar(0.8); M.tileLight.color.copy(c).multiplyScalar(1.12);
+  tileInst.forEach(o => o.material.color.copy(c).multiplyScalar(1.06));
+  M.plaster.color.set(S.wall); wallMats.forEach(m => m.color.set(S.wall));
+  const cur = document.getElementById('palCur'); cur.style.setProperty('--roof', S.roof); cur.style.setProperty('--wall', S.wall);
+  palEl.querySelectorAll('button').forEach(b => { b.classList.toggle('on', b.dataset.id === S.id); b.setAttribute('aria-pressed', b.dataset.id === S.id); });
+  try { localStorage.setItem('sakura-scheme', S.id); } catch (e) {}
+}
+for (const S of SCHEMES){
+  const b = document.createElement('button'); b.type = 'button'; b.dataset.id = S.id; b.setAttribute('aria-label', S.name);
+  b.innerHTML = `<span class="sw" style="--roof:${S.roof};--wall:${S.wall}"></span>${S.name}`;
+  b.addEventListener('click', () => applyScheme(S.id));
+  palEl.appendChild(b);
+}
+palBtn.addEventListener('click', () => { palEl.hidden = !palEl.hidden; palBtn.setAttribute('aria-expanded', !palEl.hidden); });
+canvas.addEventListener('pointerdown', () => { if (!palEl.hidden){ palEl.hidden = true; palBtn.setAttribute('aria-expanded', false); } });
+let savedScheme = 'B'; try { savedScheme = localStorage.getItem('sakura-scheme') || 'B'; } catch (e) {}
+applyScheme(savedScheme);
+
 /* pure mode */
 const exitBtn = document.getElementById('exit');
 function setPure(on){ document.body.classList.toggle('pure', on); exitBtn.hidden = !on; }
@@ -1579,9 +1620,7 @@ tick();
 document.getElementById('loading').classList.add('done');
 window.__ready = true;
 window.__debug = { treeInfo, RY, camera, controls, setSeason: n => { setSeason(n); stepSeason(10); },
-  scheme: (roof, wall) => { const c = C(roof); M.tile.color.copy(c); M.tileDark.color.copy(c).multiplyScalar(0.8); M.tileLight.color.copy(c).multiplyScalar(1.12);
-    house.children.filter(o => o.isInstancedMesh && o.material !== M.tileDark).forEach(o => o.material.color.copy(c).multiplyScalar(1.06));
-    M.plaster.color.set(wall); wallMats.forEach(m => m.color.set(wall)); }, setTime: t => { tState.t = tState.to = t; tState.dur = 0; slider.value = t; applyTime(t); } };
+  scheme: id => applyScheme(id), setTime: t => { tState.t = tState.to = t; tState.dur = 0; slider.value = t; applyTime(t); } };
 </script>
 
 </body>
